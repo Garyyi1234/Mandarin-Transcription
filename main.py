@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import time
 import argparse
+from transcriber import Transcriber
 
 def main():
     parser = argparse.ArgumentParser(description="Virtual Camera with Overlay")
@@ -30,6 +31,10 @@ def main():
         fps = 30 # Fallback FPS
 
     print(f"Webcam opened: {width}x{height} @ {fps}fps")
+
+    # Start the background transcriber
+    transcriber = Transcriber()
+    transcriber.start()
 
     # 2. Open the virtual camera
     try:
@@ -83,6 +88,7 @@ def main():
         print(f"Failed to start virtual camera: {e}")
         print("Make sure you have run setup_driver.bat as Administrator to install the UnityCapture driver.")
     finally:
+        transcriber.stop()
         cap.release()
 
 if __name__ == "__main__":

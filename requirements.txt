@@ -2,3 +2,5 @@ opencv-python
 pyvirtualcam
 numpy
 pillow
+pyaudio
+faster-whisper

@@ -3,8 +3,13 @@ import pyvirtualcam
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import time
+import argparse
 
 def main():
+    parser = argparse.ArgumentParser(description="Virtual Camera with Overlay")
+    parser.add_argument('flip', nargs='?', type=int, default=0, choices=[0, 1], help="Pass 1 to flip the camera horizontally, 0 to keep it normal.")
+    args = parser.parse_args()
+
     # 1. Initialize physical webcam
     print("Opening physical webcam...")
     cap = cv2.VideoCapture(0)
@@ -65,6 +70,10 @@ def main():
                 
                 # Convert back to OpenCV BGR frame
                 frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+                # Flip the frame horizontally if requested (AFTER text overlay)
+                if args.flip == 1:
+                    frame = cv2.flip(frame, 1)
 
                 # 4. Send to virtual camera
                 cam.send(frame)

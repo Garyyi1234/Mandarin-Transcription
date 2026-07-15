@@ -1,0 +1,21 @@
+# Virtual Environment
+.venv/
+venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller Build Folders (for later)
+build/
+dist/
+*.spec
+
+# UnityCapture Downloads
+UnityCapture.zip
+UnityCapture-master/
+
+# OS Files
+.DS_Store
+Thumbs.db

@@ -3,4 +3,5 @@ pyvirtualcam
 numpy
 pillow
 pyaudio
-faster-whisper
+deepgram-sdk
+python-dotenv

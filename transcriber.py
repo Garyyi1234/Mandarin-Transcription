@@ -1,14 +1,23 @@
 import pyaudio
-import numpy as np
 import threading
-import queue
-from faster_whisper import WhisperModel
+import os
+from dotenv import load_dotenv
+from deepgram import DeepgramClient
+from deepgram.core.events import EventType
 
 class Transcriber:
-    def __init__(self, model_size="small", device="cpu", compute_type="int8"):
-        print(f"Initializing Whisper model ({model_size}) on {device}...")
-        self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        print("Model loaded.")
+    def __init__(self):
+        print("Initializing Deepgram AI (v7+)...")
+        
+        load_dotenv()
+        api_key = os.getenv("DEEPGRAM_API_KEY")
+        if not api_key:
+            print("ERROR: DEEPGRAM_API_KEY not found in .env file!")
+            self.is_running = False
+            return
+            
+        self.deepgram = DeepgramClient(api_key=api_key)
+        self.is_running = False
         
         # Audio configuration
         self.FORMAT = pyaudio.paInt16
@@ -18,33 +27,31 @@ class Transcriber:
         
         self.audio = pyaudio.PyAudio()
         self.stream = None
-        
-        self.audio_queue = queue.Queue()
-        self.is_running = False
         self.record_thread = None
-        self.transcribe_thread = None
-
-        # The initial prompt to help with code-switching
-        self.initial_prompt = "You are a bilingual transcriber. This audio contains both Mandarin and English, mainly mandarin with certain nouns in English"
 
     def start(self):
+        if not hasattr(self, 'deepgram'):
+            return
+            
         self.is_running = True
+        
+        # Start PyAudio microphone stream
         self.stream = self.audio.open(format=self.FORMAT,
                                       channels=self.CHANNELS,
                                       rate=self.RATE,
                                       input=True,
                                       frames_per_buffer=self.CHUNK)
         
+        # In Deepgram SDK v7+, the live connection is a context manager.
+        # We run the context manager inside our recording thread so it doesn't block the main thread.
         self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
-        self.transcribe_thread = threading.Thread(target=self._transcribe_loop, daemon=True)
-        
         self.record_thread.start()
-        self.transcribe_thread.start()
-        print("Transcription started.")
+        print("Microphone listening... Speak now!")
 
     def stop(self):
-        print("Stopping transcriber...")
+        print("\nStopping transcriber...")
         self.is_running = False
+            
         if self.stream:
             self.stream.stop_stream()
             self.stream.close()
@@ -52,64 +59,57 @@ class Transcriber:
         
         if self.record_thread:
             self.record_thread.join()
-        if self.transcribe_thread:
-            # Put a dummy item to unblock the queue if it's empty
-            self.audio_queue.put(None)
-            self.transcribe_thread.join()
         print("Transcriber stopped.")
 
     def _record_loop(self):
-        # We record in chunks and send them to the transcription thread.
-        # Let's accumulate 1.5 seconds of audio at a time for faster responsiveness.
-        buffer_frames = []
-        frames_per_buffer = int(self.RATE / self.CHUNK * 1.5) # 1.5 seconds
-        
-        while self.is_running:
-            try:
-                data = self.stream.read(self.CHUNK, exception_on_overflow=False)
-                buffer_frames.append(data)
-                
-                if len(buffer_frames) >= frames_per_buffer:
-                    # Combine chunks
-                    audio_data = b''.join(buffer_frames)
-                    buffer_frames = []
+        # Open the Live Transcription (v1) WebSocket connection
+        with self.deepgram.listen.v1.connect(
+            model="nova-3",
+            language="multi",
+            smart_format=True,
+            interim_results=True,
+            encoding="linear16",
+            channels=self.CHANNELS,
+            sample_rate=self.RATE,
+            request_options={"additional_query_parameters": {"language_hint": "zh"}}
+        ) as dg_connection:
+            
+            def on_message(result):
+                sentence = result.channel.alternatives[0].transcript
+                if len(sentence) == 0:
+                    return
                     
-                    # Convert to numpy array of floats between -1 and 1 (required by faster-whisper)
-                    audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-                    self.audio_queue.put(audio_np)
-            except Exception as e:
-                print(f"Audio recording error: {e}")
+                if result.is_final:
+                    # Clear the interim line and print the final sentence
+                    print(f"\r[Final] {sentence}                                    ")
+                else:
+                    # Print interim results on the same line using carriage return
+                    print(f"\r[Interim] {sentence}", end="", flush=True)
 
-    def _transcribe_loop(self):
-        while self.is_running:
-            audio_np = self.audio_queue.get()
-            if audio_np is None:
-                break # Stop signal
-                
-            # Perform VAD (Voice Activity Detection) - simple threshold
-            # If the audio is completely silent, skip transcription to save CPU
-            if np.max(np.abs(audio_np)) < 0.01:
-                continue
+            def on_error(error):
+                print(f"Deepgram Error: {error}")
 
-            try:
-                # Transcribe the audio chunk
-                segments, info = self.model.transcribe(
-                    audio_np, 
-                    beam_size=5, 
-                    initial_prompt=self.initial_prompt,
-                    condition_on_previous_text=False
-                )
-                
-                for segment in segments:
-                    text = segment.text.strip()
-                    if text:
-                        print(f"[{info.language}] {text}")
-            except Exception as e:
-                print(f"Transcription error: {e}")
+            dg_connection.on(EventType.MESSAGE, on_message)
+            dg_connection.on(EventType.ERROR, on_error)
+            
+            # The v7 SDK requires calling start_listening() to begin processing events,
+            # but it is a blocking loop! We must run it in a separate thread so we can send audio.
+            listen_thread = threading.Thread(target=dg_connection.start_listening, daemon=True)
+            listen_thread.start()
+            
+            print("Deepgram WebSocket Connected.")
+            
+            # Blast every tiny 0.06s chunk (1024 bytes) directly to Deepgram!
+            while self.is_running:
+                try:
+                    data = self.stream.read(self.CHUNK, exception_on_overflow=False)
+                    dg_connection.send_media(data)
+                except Exception as e:
+                    print(f"Audio error: {e}")
 
 if __name__ == "__main__":
     import time
-    print("Testing transcriber standalone...")
+    print("Testing Deepgram WebSocket standalone...")
     t = Transcriber()
     t.start()
     

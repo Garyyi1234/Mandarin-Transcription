@@ -1,36 +1,37 @@
 import pyaudio
 import threading
 import os
+import asyncio
+import websockets
+import json
+import base64
 from dotenv import load_dotenv
-from deepgram import DeepgramClient
-from deepgram.core.events import EventType
 
 class Transcriber:
     def __init__(self):
-        print("Initializing Deepgram AI (v7+)...")
+        print("Initializing ElevenLabs Scribe v2 Realtime...")
         
         load_dotenv()
-        api_key = os.getenv("DEEPGRAM_API_KEY")
-        if not api_key:
-            print("ERROR: DEEPGRAM_API_KEY not found in .env file!")
+        self.api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not self.api_key:
+            print("ERROR: ELEVENLABS_API_KEY not found in .env file!")
             self.is_running = False
             return
             
-        self.deepgram = DeepgramClient(api_key=api_key)
         self.is_running = False
         
-        # Audio configuration
+        # Audio configuration (ElevenLabs accepts linear PCM 16000Hz)
         self.FORMAT = pyaudio.paInt16
         self.CHANNELS = 1
         self.RATE = 16000
-        self.CHUNK = 1024
+        self.CHUNK = 2048 # slightly larger chunks for WS
         
         self.audio = pyaudio.PyAudio()
         self.stream = None
         self.record_thread = None
 
     def start(self):
-        if not hasattr(self, 'deepgram'):
+        if not self.api_key:
             return
             
         self.is_running = True
@@ -42,9 +43,8 @@ class Transcriber:
                                       input=True,
                                       frames_per_buffer=self.CHUNK)
         
-        # In Deepgram SDK v7+, the live connection is a context manager.
-        # We run the context manager inside our recording thread so it doesn't block the main thread.
-        self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
+        # We run the asyncio event loop inside our recording thread
+        self.record_thread = threading.Thread(target=self._run_async_loop, daemon=True)
         self.record_thread.start()
         print("Microphone listening... Speak now!")
 
@@ -61,55 +61,84 @@ class Transcriber:
             self.record_thread.join()
         print("Transcriber stopped.")
 
-    def _record_loop(self):
-        # Open the Live Transcription (v1) WebSocket connection
-        with self.deepgram.listen.v1.connect(
-            model="nova-3",
-            language="multi",
-            smart_format=True,
-            interim_results=True,
-            encoding="linear16",
-            channels=self.CHANNELS,
-            sample_rate=self.RATE,
-            request_options={"additional_query_parameters": {"language_hint": "zh"}}
-        ) as dg_connection:
-            
-            def on_message(result):
-                sentence = result.channel.alternatives[0].transcript
-                if len(sentence) == 0:
-                    return
-                    
-                if result.is_final:
-                    # Clear the interim line and print the final sentence
-                    print(f"\r[Final] {sentence}                                    ")
-                else:
-                    # Print interim results on the same line using carriage return
-                    print(f"\r[Interim] {sentence}", end="", flush=True)
+    def _run_async_loop(self):
+        # Create a new event loop for this background thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._async_record_loop())
+        loop.close()
 
-            def on_error(error):
-                print(f"Deepgram Error: {error}")
+    async def _async_record_loop(self):
+        url = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime"
+        headers = {"xi-api-key": self.api_key}
+        
+        try:
+            async with websockets.connect(url, additional_headers=headers) as ws:
+                print("ElevenLabs WebSocket Connected.")
+                
+                async def sender():
+                    while self.is_running:
+                        try:
+                            # Read audio from mic
+                            data = self.stream.read(self.CHUNK, exception_on_overflow=False)
+                            # ElevenLabs STT expects a JSON payload with base64 encoded audio
+                            payload = {
+                                "message_type": "input_audio_chunk",
+                                "audio_base_64": base64.b64encode(data).decode("utf-8"),
+                                "sample_rate": self.RATE,
+                                "commit": False
+                            }
+                            await ws.send(json.dumps(payload))
+                            await asyncio.sleep(0.01) # Yield context
+                        except Exception as e:
+                            print(f"Audio sender error: {e}")
+                            break
+                            
+                async def receiver():
+                    while self.is_running:
+                        try:
+                            # Use wait_for so we periodically check self.is_running
+                            # and don't hang indefinitely on Ctrl+C
+                            try:
+                                msg_str = await asyncio.wait_for(ws.recv(), timeout=0.5)
+                            except asyncio.TimeoutError:
+                                continue
+                                
+                            msg = json.loads(msg_str)
+                            
+                            msg_type = msg.get("message_type", msg.get("type", ""))
+                            
+                            # Handle different response types from ElevenLabs
+                            if msg_type == "partial_transcript":
+                                text = msg.get("text", "")
+                                print(f"\r[Interim] {text}", end="", flush=True)
+                            elif msg_type == "final_transcript":
+                                text = msg.get("text", "")
+                                print(f"\r[Final] {text}                                    ")
+                            elif "text" in msg:
+                                # Fallback if event type is named differently
+                                is_final = msg.get("is_final", False)
+                                text = msg.get("text", "")
+                                if is_final:
+                                    print(f"\r[Final] {text}                                    ")
+                                else:
+                                    print(f"\r[Interim] {text}", end="", flush=True)
+                                
+                        except websockets.exceptions.ConnectionClosed:
+                            print("\nWebSocket connection closed by server.")
+                            break
+                        except Exception as e:
+                            print(f"\nReceiver error: {e}")
+                            break
 
-            dg_connection.on(EventType.MESSAGE, on_message)
-            dg_connection.on(EventType.ERROR, on_error)
-            
-            # The v7 SDK requires calling start_listening() to begin processing events,
-            # but it is a blocking loop! We must run it in a separate thread so we can send audio.
-            listen_thread = threading.Thread(target=dg_connection.start_listening, daemon=True)
-            listen_thread.start()
-            
-            print("Deepgram WebSocket Connected.")
-            
-            # Blast every tiny 0.06s chunk (1024 bytes) directly to Deepgram!
-            while self.is_running:
-                try:
-                    data = self.stream.read(self.CHUNK, exception_on_overflow=False)
-                    dg_connection.send_media(data)
-                except Exception as e:
-                    print(f"Audio error: {e}")
+                await asyncio.gather(sender(), receiver())
+                
+        except Exception as e:
+            print(f"ElevenLabs WebSocket error: {e}")
 
 if __name__ == "__main__":
     import time
-    print("Testing Deepgram WebSocket standalone...")
+    print("Testing ElevenLabs WebSocket standalone...")
     t = Transcriber()
     t.start()
     

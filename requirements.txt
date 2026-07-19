@@ -3,5 +3,5 @@ pyvirtualcam
 numpy
 pillow
 pyaudio
-deepgram-sdk
+websockets
 python-dotenv

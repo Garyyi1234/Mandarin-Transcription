@@ -69,7 +69,7 @@ class Transcriber:
         loop.close()
 
     async def _async_record_loop(self):
-        url = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime"
+        url = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&commit_strategy=vad"
         headers = {"xi-api-key": self.api_key}
         
         try:
@@ -112,11 +112,12 @@ class Transcriber:
                             if msg_type == "partial_transcript":
                                 text = msg.get("text", "")
                                 print(f"\r[Interim] {text}", end="", flush=True)
-                            elif msg_type == "final_transcript":
+                            elif msg_type == "committed_transcript" or msg_type == "final_transcript":
                                 text = msg.get("text", "")
                                 print(f"\r[Final] {text}                                    ")
-                            elif "text" in msg:
-                                # Fallback if event type is named differently
+                            elif msg_type != "session_started":
+                                # Catch-all debug for unexpected messages from ElevenLabs
+                                print(f"\n[DEBUG] Unknown message: {msg_str}")
                                 is_final = msg.get("is_final", False)
                                 text = msg.get("text", "")
                                 if is_final:

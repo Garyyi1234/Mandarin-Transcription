@@ -21,5 +21,8 @@ UnityCapture-master/
 Thumbs.db
 
 .env
+
 transcribedText.txt
-test_gemini.py
+gemini_latency_test.py
+translate_test.py
+translate_latency_test.py

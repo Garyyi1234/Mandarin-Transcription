@@ -8,8 +8,10 @@ import base64
 from dotenv import load_dotenv
 
 class Transcriber:
-    def __init__(self):
-        print("Initializing ElevenLabs Scribe v2 Realtime...")
+    def __init__(self, language_code="zh", mute_console=False):
+        print(f"Initializing ElevenLabs Scribe v2 Realtime (Language: {language_code})...")
+        self.language_code = language_code
+        self.mute_console = mute_console
         
         load_dotenv()
         self.api_key = os.getenv("ELEVENLABS_API_KEY")
@@ -77,7 +79,7 @@ class Transcriber:
         loop.close()
 
     async def _async_record_loop(self):
-        url = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&commit_strategy=vad"
+        url = f"wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&commit_strategy=vad&language_code={self.language_code}"
         headers = {"xi-api-key": self.api_key}
         
         try:
@@ -125,7 +127,8 @@ class Transcriber:
                                             self.previous_text = self.current_text
                                             self.is_current_final = False
                                         self.current_text = text
-                                print(f"\r[Interim] {text}", end="", flush=True)
+                                if not self.mute_console:
+                                    print(f"\r[Interim] {text}", end="", flush=True)
                             elif msg_type == "committed_transcript" or msg_type == "final_transcript":
                                 text = msg.get("text", "")
                                 if text:
@@ -134,7 +137,8 @@ class Transcriber:
                                             self.previous_text = self.current_text
                                         self.current_text = text
                                         self.is_current_final = True
-                                print(f"\r[Final] {text}                                    ")
+                                if not self.mute_console:
+                                    print(f"\r[Final] {text}                                    ")
                             elif msg_type != "session_started":
                                 # Catch-all debug for unexpected messages from ElevenLabs
                                 print(f"\n[DEBUG] Unknown message: {msg_str}")
@@ -150,10 +154,11 @@ class Transcriber:
                                         self.current_text = text
                                         if is_final:
                                             self.is_current_final = True
-                                if is_final:
-                                    print(f"\r[Final] {text}                                    ")
-                                else:
-                                    print(f"\r[Interim] {text}", end="", flush=True)
+                                if not self.mute_console:
+                                    if is_final:
+                                        print(f"\r[Final] {text}                                    ")
+                                    else:
+                                        print(f"\r[Interim] {text}", end="", flush=True)
                                 
                         except websockets.exceptions.ConnectionClosed:
                             print("\nWebSocket connection closed by server.")

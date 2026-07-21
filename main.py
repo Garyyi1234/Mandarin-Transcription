@@ -100,7 +100,7 @@ def main():
                 cam.sleep_until_next_frame()
 
     except KeyboardInterrupt:
-        print("\nending...")
+        print("\nShutting down...")
     except Exception as e:
         print(f"Failed to start virtual camera: {e}")
         print("Make sure you have run setup_driver.bat as Administrator to install the UnityCapture driver.")

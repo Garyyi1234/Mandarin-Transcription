@@ -49,29 +49,47 @@ def main():
                     print("Error reading frame from webcam.")
                     break
 
-                # 3. Add the Dummy overlay using PIL
+                # 3. Add the text overlay using PIL
                 # Convert OpenCV BGR image to PIL RGB image
                 img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                draw = ImageDraw.Draw(img_pil)
                 
-                # Load a font (we try a standard Windows emoji font if possible, else default)
+                # Create a transparent overlay for the text
+                overlay = Image.new('RGBA', img_pil.size, (0, 0, 0, 0))
+                draw = ImageDraw.Draw(overlay)
+                
+                # Load a font (try Microsoft YaHei or SimHei for Mandarin support, fallback to default)
                 try:
-                    font = ImageFont.truetype("seguiemj.ttf", 64)
+                    font = ImageFont.truetype("msyh.ttc", 64)
                 except IOError:
-                    font = ImageFont.load_default()
+                    try:
+                        font = ImageFont.truetype("simhei.ttf", 64)
+                    except IOError:
+                        font = ImageFont.load_default()
 
-                # Draw a placeholder text and emoji
-                text = "Dummy Virtual Camera 🌙"
+                # Get transcriber text
+                previous_text, current_text = transcriber.get_texts()
                 
-                # Simple text positioning (bottom left)
-                text_position = (20, height - 100)
+                margin_x = 20
+                current_y = height - 120
+                previous_y = current_y - 80
                 
-                # Draw black background for text visibility
-                bbox = draw.textbbox(text_position, text, font=font)
-                draw.rectangle([bbox[0]-10, bbox[1]-10, bbox[2]+10, bbox[3]+10], fill=(0, 0, 0, 128))
+                # Draw previous text
+                if previous_text:
+                    bbox_prev = draw.textbbox((margin_x, previous_y), previous_text, font=font)
+                    draw.rectangle([bbox_prev[0]-10, bbox_prev[1]-10, bbox_prev[2]+10, bbox_prev[3]+10], fill=(0, 0, 0, 128))
+                    draw.text((margin_x, previous_y), previous_text, font=font, fill=(200, 200, 200))
+
+                # Draw current text
+                if current_text:
+                    bbox_curr = draw.textbbox((margin_x, current_y), current_text, font=font)
+                    draw.rectangle([bbox_curr[0]-10, bbox_curr[1]-10, bbox_curr[2]+10, bbox_curr[3]+10], fill=(0, 0, 0, 128))
+                    draw.text((margin_x, current_y), current_text, font=font, fill=(255, 255, 255))
                 
-                # Draw text
-                draw.text(text_position, text, font=font, fill=(255, 255, 255), embedded_color=True)
+                # Mirror the text left-right
+                overlay = overlay.transpose(Image.FLIP_LEFT_RIGHT)
+                
+                # Paste the mirrored text overlay onto the main image
+                img_pil.paste(overlay, (0, 0), overlay)
                 
                 # Convert back to OpenCV BGR frame
                 frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)

@@ -19,6 +19,10 @@ class Transcriber:
             return
             
         self.is_running = False
+        self.current_text = ""
+        self.previous_text = ""
+        self.is_current_final = True
+        self.lock = threading.Lock()
         
         # Audio configuration (ElevenLabs accepts linear PCM 16000Hz)
         self.FORMAT = pyaudio.paInt16
@@ -29,6 +33,10 @@ class Transcriber:
         self.audio = pyaudio.PyAudio()
         self.stream = None
         self.record_thread = None
+
+    def get_texts(self):
+        with self.lock:
+            return self.previous_text, self.current_text
 
     def start(self):
         if not self.api_key:
@@ -111,15 +119,37 @@ class Transcriber:
                             # Handle different response types from ElevenLabs
                             if msg_type == "partial_transcript":
                                 text = msg.get("text", "")
+                                if text:
+                                    with self.lock:
+                                        if self.is_current_final:
+                                            self.previous_text = self.current_text
+                                            self.is_current_final = False
+                                        self.current_text = text
                                 print(f"\r[Interim] {text}", end="", flush=True)
                             elif msg_type == "committed_transcript" or msg_type == "final_transcript":
                                 text = msg.get("text", "")
+                                if text:
+                                    with self.lock:
+                                        if self.is_current_final:
+                                            self.previous_text = self.current_text
+                                        self.current_text = text
+                                        self.is_current_final = True
                                 print(f"\r[Final] {text}                                    ")
                             elif msg_type != "session_started":
                                 # Catch-all debug for unexpected messages from ElevenLabs
                                 print(f"\n[DEBUG] Unknown message: {msg_str}")
                                 is_final = msg.get("is_final", False)
                                 text = msg.get("text", "")
+                                if text:
+                                    with self.lock:
+                                        if self.is_current_final and not is_final:
+                                            self.previous_text = self.current_text
+                                            self.is_current_final = False
+                                        elif self.is_current_final and is_final:
+                                            self.previous_text = self.current_text
+                                        self.current_text = text
+                                        if is_final:
+                                            self.is_current_final = True
                                 if is_final:
                                     print(f"\r[Final] {text}                                    ")
                                 else:

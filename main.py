@@ -8,7 +8,7 @@ from transcriber import Transcriber
 
 def main():
     parser = argparse.ArgumentParser(description="Virtual Camera with Overlay")
-    parser.add_argument('flip', nargs='?', type=int, default=0, choices=[0, 1], help="Pass 1 to flip the camera horizontally, 0 to keep it normal.")
+    parser.add_argument('flip', nargs='?', type=int, default=0, choices=[0, 1], help="Pass 1 to flip the text horizontally, 0 to keep it normal.")
     args = parser.parse_args()
 
     # 1. Initialize physical webcam
@@ -85,23 +85,22 @@ def main():
                     draw.rectangle([bbox_curr[0]-10, bbox_curr[1]-10, bbox_curr[2]+10, bbox_curr[3]+10], fill=(0, 0, 0, 128))
                     draw.text((margin_x, current_y), current_text, font=font, fill=(255, 255, 255))
                 
-                # Mirror the text left-right
-                overlay = overlay.transpose(Image.FLIP_LEFT_RIGHT)
+                # Mirror the text left-right if requested
+                if args.flip == 1:
+                    overlay = overlay.transpose(Image.FLIP_LEFT_RIGHT)
                 
-                # Paste the mirrored text overlay onto the main image
+                # Paste the text overlay onto the main image
                 img_pil.paste(overlay, (0, 0), overlay)
                 
                 # Convert back to OpenCV BGR frame
                 frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
-                # Flip the frame horizontally if requested (AFTER text overlay)
-                if args.flip == 1:
-                    frame = cv2.flip(frame, 1)
-
                 # 4. Send to virtual camera
                 cam.send(frame)
                 cam.sleep_until_next_frame()
 
+    except KeyboardInterrupt:
+        print("\nending...")
     except Exception as e:
         print(f"Failed to start virtual camera: {e}")
         print("Make sure you have run setup_driver.bat as Administrator to install the UnityCapture driver.")

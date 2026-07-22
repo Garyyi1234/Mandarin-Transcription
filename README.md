@@ -6,10 +6,8 @@ Installation:
 3. This should create a folder "UnityCapture-master"
 4. Run Install.bat in "UnityCapture-master/Install" as administrator to register the virtual camera
 5. Paste api keys in .env_format and rename to .env
-
 Run:
 6. pip install -r requirements.txt
-
 7. python main.py
 
 Optionally, run: python main.py 1

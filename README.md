@@ -1,4 +1,4 @@
-Mandarin captioning in camera to help my grandfather (hard of hearing) understand broken mandarin more clearly.
+Mandarin captioning in virtual camera to help my grandfather (hard of hearing) understand broken mandarin more clearly on WeChat calls
 
 Installation:
 1. Clone the repo

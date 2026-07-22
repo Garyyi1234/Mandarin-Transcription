@@ -7,7 +7,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# PyInstaller Build Folders (for later)
+# PyInstaller Build Folders
 build/
 dist/
 *.spec
@@ -20,6 +20,7 @@ UnityCapture-master/
 .DS_Store
 Thumbs.db
 
+#Other stuff
 .env
 
 transcribedText.txt

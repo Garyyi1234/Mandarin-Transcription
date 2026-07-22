@@ -9,6 +9,7 @@ Installation:
 
 Run:
 6. pip install -r requirements.txt
+
 7. python main.py
 
 Optionally, run: python main.py 1

@@ -8,7 +8,7 @@ from transcriber import Transcriber
 
 def main():
     parser = argparse.ArgumentParser(description="Virtual Camera with Overlay")
-    parser.add_argument('flip', nargs='?', type=int, default=0, choices=[0, 1], help="Pass 1 to flip the text horizontally, 0 to keep it normal.")
+    parser.add_argument('flip', nargs='?', type=int, default=1, choices=[0, 1], help="Pass 1 to flip the text horizontally, 0 to keep it normal.")
     args = parser.parse_args()
 
     # 1. Initialize physical webcam

@@ -5,7 +5,9 @@ import asyncio
 import websockets
 import json
 import base64
+import time
 from dotenv import load_dotenv
+from deep_translator import GoogleTranslator
 
 class Transcriber:
     def __init__(self, language_code="zh", mute_console=False):
@@ -15,6 +17,13 @@ class Transcriber:
         
         load_dotenv()
         self.api_key = os.getenv("ELEVENLABS_API_KEY")
+        
+        self.translator = GoogleTranslator(source='en', target='zh-CN')
+        self.translated_previous = ""
+        self.translated_current = ""
+        self.last_translated_raw_prev = ""
+        self.last_translated_raw_curr = ""
+        self._translate_thread = None
         if not self.api_key:
             print("ERROR: ELEVENLABS_API_KEY not found in .env file!")
             self.is_running = False
@@ -38,13 +47,53 @@ class Transcriber:
 
     def get_texts(self):
         with self.lock:
-            return self.previous_text, self.current_text
+            prev = self.translated_previous if (self.previous_text and self.previous_text == self.last_translated_raw_prev) else self.previous_text
+            curr = self.translated_current if (self.current_text and self.current_text == self.last_translated_raw_curr) else self.current_text
+            return prev, curr
+
+    def _translation_worker(self):
+        while self.is_running:
+            with self.lock:
+                raw_curr = self.current_text
+                raw_prev = self.previous_text
+                is_final = self.is_current_final
+                
+            # Translate previous if it hasn't been translated
+            if raw_prev and raw_prev != self.last_translated_raw_prev:
+                # If we just translated this as the current_text, copy it over to save an API call
+                if raw_prev == self.last_translated_raw_curr:
+                    with self.lock:
+                        self.translated_previous = self.translated_current
+                        self.last_translated_raw_prev = raw_prev
+                else:
+                    try:
+                        trans = self.translator.translate(raw_prev)
+                        with self.lock:
+                            self.translated_previous = trans
+                            self.last_translated_raw_prev = raw_prev
+                    except Exception as e:
+                        pass
+                        
+            # Translate current ONLY if it is final
+            if is_final and raw_curr and raw_curr != self.last_translated_raw_curr:
+                try:
+                    trans = self.translator.translate(raw_curr)
+                    with self.lock:
+                        self.translated_current = trans
+                        self.last_translated_raw_curr = raw_curr
+                except Exception as e:
+                    pass
+            
+            time.sleep(0.1)
 
     def start(self):
         if not self.api_key:
             return
             
         self.is_running = True
+        
+        self._translate_thread = threading.Thread(target=self._translation_worker, daemon=True)
+        self._translate_thread.start()
         
         # Start PyAudio microphone stream
         self.stream = self.audio.open(format=self.FORMAT,
@@ -69,6 +118,8 @@ class Transcriber:
         
         if self.record_thread:
             self.record_thread.join()
+        if self._translate_thread:
+            self._translate_thread.join()
         print("Transcriber stopped.")
 
     def _run_async_loop(self):
